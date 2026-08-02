@@ -1,0 +1,6 @@
+# Local secrets / scratch — never commit these
+*.env
+.env
+.env.*
+routerly.json.local
+.DS_Store
