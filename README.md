@@ -42,6 +42,25 @@ x-routerly-conversation-id: <OMP session UUIDv7>
 The ID is OMP's active session ID (from `ctx.sessionManager.getSessionId()`), so it is
 stable across context compactions within a session and changes when a new session starts.
 
+## Cost & upstream telemetry
+
+OMP's core `openai-completions` parser only reads standard OpenAI fields, but Routerly
+reports per-call cost in a nonstandard `usage.estimated_cost` field and names the serving
+upstream model in `chunk.model` (not a top-level `provider` field). With no intervention
+these show up as `cost.total = 0` and `upstreamProvider = undefined`.
+
+Because this extension owns the `curl` transport, it taps the response stream as it
+streams and captures Routerly's real telemetry:
+
+- **Upstream model/provider** — from Routerly's `trace` events (`modelId`, `provider`)
+  when present, else from `chunk.model`.
+- **Cost (USD)** — from Routerly's billed `totalCostUsd` in the `model:success` trace
+  event, else from the nonstandard `usage.estimated_cost`, else `0`.
+
+The captured values are applied to the assistant message in `turn_end` (which hands the
+extension a direct reference to the message, so the fields are visible to callers and the
+recorded session).
+
 ## Files
 
 | In this repo | Installed to (live) |
