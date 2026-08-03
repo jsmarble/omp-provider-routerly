@@ -32,6 +32,36 @@ type RouterlyProviderModel = {
 	maxTokens: number;
 };
 
+// ---------------------------------------------------------------------------
+// Why this extension shells out to `curl` instead of using Bun's native fetch.
+//
+// Routerly is typically self-hosted on an internal network (e.g. an RFC1918
+// subnet reached over a specific local interface, such as a dedicated 10G NIC
+// or a Docker/bridge interface). On multi-interface hosts, Bun's fetch (and
+// Node's) picks the wrong route for some of these subnets and fails with the
+// generic "Was there a typo in the url or port?" error, while `curl` — which
+// does proper interface/source-address selection — connects fine. This was
+// verified empirically on macOS: curl returned 200 where Bun and Node both
+// failed against the same endpoint.
+//
+// So the transport below spawns `curl` per request and streams the result back
+// as a real web ReadableStream. It only intercepts requests whose origin
+// matches a Routerly base URL; every other fetch in the process is passed
+// straight through to the captured native fetch.
+//
+// KNOWN LIMITATIONS (documented, not hidden):
+//  - HTTP/1.x only. The header parser splits on CRLF and reads an HTTP/1-style
+//    status line; it will hang on an HTTP/2 (h2c) Routerly endpoint. Routerly's
+//    default is HTTP/1, so this is acceptable for the intended deployment.
+//  - Global fetch patch. This assigns globalThis.fetch once at load and never
+//    restores it. It is defensive — it forwards non-Routerly origins untouched
+//    — but if another extension also patches global fetch, last-loaded wins.
+//  - conversation id. `routerlyConversationId` is a module-level value set in
+//    `before_provider_request` and read when the curl request is built. Under
+//    parallel Routerly turns it is last-write-wins (TOCTOU). OMP's normal
+//    interactive flow is one active turn, so this is safe in practice; it is
+//    called out here so nobody relies on it under concurrency.
+// ---------------------------------------------------------------------------
 const DEFAULT_BASE_URL = "http://127.0.0.1:3000/v1";
 const DEFAULT_ENDPOINT_PROMPT = `${DEFAULT_BASE_URL}/`;
 const DEFAULT_CONTEXT_WINDOW = 1_000_000;
